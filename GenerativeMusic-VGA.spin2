@@ -1,3 +1,17 @@
+{
+    --------------------------------------------
+    Filename: GenerativeMusic-VGA.spin2
+    Author: Jesse Burt
+    Description: Music generated algorithmically, and visualized
+        on a VGA display.
+        Inspired by viznut's Bytebeat:
+        https://www.youtube.com/watch?v=tCRPUv8V22o)
+    Copyright (c) 2020
+    Started Apr 26, 2020
+    Updated Apr 27, 2020
+    See end of file for terms of use.
+    --------------------------------------------
+}
 CON
 
     ' 250MHz
@@ -12,6 +26,7 @@ CON
     SETFREQ         = 1<<24 + (XDIV-1)<<18 + (XMUL-1)<<8 + XPPPP<<4 + XOSC<<2
     ENAFREQ         = SETFREQ + XSEL
 
+' - User-modifiable constants -
     LED             = cfg#LED1
     SER_RX          = cfg#SER_RX
     SER_TX          = cfg#SER_TX
@@ -20,8 +35,11 @@ CON
     AUD_L           = 6
     AUD_R           = 7
     SAMPLE_RATE     = 8000
-    SAMPLE_PERIOD   = CLOCKFREQ / SAMPLE_RATE 
 
+    VGA_BASEPIN     = 0
+' -
+
+    SAMPLE_PERIOD   = CLOCKFREQ / SAMPLE_RATE
     WIDTH           = 320
     HEIGHT          = 240
     XMAX            = WIDTH-1
@@ -29,8 +47,6 @@ CON
     BUFFSZ          = WIDTH * HEIGHT
     BPP             = 1
     BPL             = WIDTH * BPP
-
-    VGA_BASEPIN     = 0                                     ' 0, 8, 16, 24, 32, 40, 48
 
 OBJ
 
@@ -73,12 +89,12 @@ PUB cog_GenerateSamples | t
     repeat
         t++
         _sample := ((t * 5) & t >> 7) | ( (t * 3) & t >> 10)                               ' viznut
-'        _sample := ((t * 9) & (t >> 4) | (t * 5) & (t >> 7) | (t * 3) & (t / 1024) - 1)
+'        _sample := ((t * 9) & (t >> 4) | (t * 5) & (t >> 7) | (t * 3) & (t / 1024) - 1)    ' stephth, viznut
 '        _sample := t & (t >> 8)                                                            ' Sierpinski
-'        _sample := ((t*5 & t>>7) | (t*3&t>>10)) & (50^-100) // 128
-'        _sample := t * (t >> ((t>>9|t>>8)) & 63 & t>>4)
-'        _sample := t * ((t>>3|t>>9)&82&t>>9)
-'        _sample := t * ((t>>3|t>>9)&74&t>>15)
+'        _sample := ((t*5 & t>>7) | (t*3&t>>10)) & (50^-100) // 128                         'XXX find credits
+'        _sample := t * (t >> ((t>>9|t>>8)) & 63 & t>>4)                                    '
+'        _sample := t * ((t>>3|t>>9)&82&t>>9)                                               '
+'        _sample := t * ((t>>3|t>>9)&74&t>>15)                                              '
 '        _sample := (t & (t >> 6) + (t << ((t >> 11) ^ ((t >> 13) + 3)) | ((t >> 14 // 64)+(t >> 14))) & (-t >> 5))       ' /* Track Crafty by Paul Hayes */
         waitcnt(cnt + (clkfreq / SAMPLE_RATE))
 

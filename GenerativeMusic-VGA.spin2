@@ -1,0 +1,190 @@
+CON
+
+    ' 250MHz
+    XTALFREQ        = 20_000_000
+    XDIV            = 2
+    XMUL            = 25
+    XDIVP           = 1
+    XOSC            = %10
+    XSEL            = %11
+    XPPPP           = ((XDIVP>>1) + 15) & $F
+    CLOCKFREQ       = XTALFREQ / XDIV * XMUL / XDIVP
+    SETFREQ         = 1<<24 + (XDIV-1)<<18 + (XMUL-1)<<8 + XPPPP<<4 + XOSC<<2
+    ENAFREQ         = SETFREQ + XSEL
+
+    LED             = cfg#LED1
+    SER_RX          = cfg#SER_RX
+    SER_TX          = cfg#SER_TX
+    SER_BAUD        = 2_000_000
+
+    AUD_L           = 6
+    AUD_R           = 7
+    SAMPLE_RATE     = 8000
+    SAMPLE_PERIOD   = CLOCKFREQ / SAMPLE_RATE 
+
+    WIDTH           = 320
+    HEIGHT          = 240
+    XMAX            = WIDTH-1
+    YMAX            = HEIGHT-1
+    BUFFSZ          = WIDTH * HEIGHT
+    BPP             = 1
+    BPL             = WIDTH * BPP
+
+    VGA_BASEPIN     = 0                                     ' 0, 8, 16, 24, 32, 40, 48
+
+OBJ
+
+    ser         : "com.serial.terminal.ansi"
+    cfg         : "core.con.boardcfg.p2eval"
+    io          : "io"
+    time        : "time"
+    audio       : "signal.dac.audio"
+    vga         : "display.vga.bitmap-8bpp"
+    fnt         : "font.5x8"
+
+VAR
+
+    long _palette[256], _samplegen_stack[50], _audio_stack[50]
+    long _sample
+    byte _framebuffer[BUFFSZ], _offscreen[BUFFSZ]
+    byte _ser_cog, _vga_cog
+    byte _trigger
+
+PUB Main | s, x
+
+    Setup
+'    _trigger := 0
+    repeat
+'        DrawSampleGreen
+        DrawSampleRed
+'        DrawWave
+        vga.ScrollLeft(0, 0, XMAX-1, YMAX)
+        vga.WaitVSync
+        vga.Update
+
+PUB cog_AudioLoop
+
+    audio.Start(AUD_L, AUD_R, SAMPLE_RATE)
+    repeat
+        audio.Output8(_sample)
+
+PUB cog_GenerateSamples | t
+
+    repeat
+        t++
+        _sample := ((t * 5) & t >> 7) | ( (t * 3) & t >> 10)                               ' viznut
+'        _sample := ((t * 9) & (t >> 4) | (t * 5) & (t >> 7) | (t * 3) & (t / 1024) - 1)
+'        _sample := t & (t >> 8)                                                            ' Sierpinski
+'        _sample := ((t*5 & t>>7) | (t*3&t>>10)) & (50^-100) // 128
+'        _sample := t * (t >> ((t>>9|t>>8)) & 63 & t>>4)
+'        _sample := t * ((t>>3|t>>9)&82&t>>9)
+'        _sample := t * ((t>>3|t>>9)&74&t>>15)
+'        _sample := (t & (t >> 6) + (t << ((t >> 11) ^ ((t >> 13) + 3)) | ((t >> 14 // 64)+(t >> 14))) & (-t >> 5))       ' /* Track Crafty by Paul Hayes */
+        waitcnt(cnt + (clkfreq / SAMPLE_RATE))
+
+PUB DrawWave | x, y, prev_x, prev_y, y_offset
+' Draw foreground blue waveform
+    y_offset := YMAX >> 2
+
+    prev_x := 0
+    prev_y := 0
+'   XXX triggering here to stop "rolling"? What to trigger on? min/max value only partially works
+    vga.Clear
+    repeat x from 0 to XMAX
+        y := ( ((_sample * 1000) / 1282) / 2) + y_offset
+'        vga.Plot(x, y, 191)                                ' XXX Too sparse to be interesting enough looking
+        vga.Line(prev_x, prev_y, x, y, 191)                 ' Draw line from previous sample to current one
+        prev_x := x
+        prev_y := y
+        waitx(SAMPLE_PERIOD)
+
+PUB DrawSampleGreen | s, x, y, mask
+' Draw background green pixel per sample    - XXX not functional
+    s := _sample
+
+    repeat y from 0 to YMAX
+        mask := y & (s & (s & 31))
+        if mask
+'            vga.Plot(XMAX-2, YMAX-(mask), (s & 63)+64)
+            vga.Box(XMAX-2, YMAX-(mask*4), XMAX-2-10, YMAX-(mask*4)-2, (s & 63) + 64, TRUE)
+
+PUB DrawSampleRed | s, x, y, mask, ht, wt
+' Draw middle y-pixel per sample
+    s := _sample                                        ' Latch a sample in a local var so all operations
+                                                        '   within the loop are working with the same sample
+
+'    if _trigger == 5                                                        ' Trigger - draw every n'th
+'        _trigger := 0
+        repeat y from 0 to YMAX
+            wt := 5
+'            mask := _sample & y                                             ' Live sample
+            mask := s & y                                                   ' Latched sample
+            if mask
+                vga.Plot(XMAX-2, YMAX-mask, 63)                             ' Dot - one color
+'                vga.Plot(XMAX-2, YMAX-mask, mask & 63)                      ' Dot - use mask as color
+
+'                repeat ht from YMAX-mask to YMAX-mask-4                     ' Filled triangle
+'                    vga.Line(XMAX-2, ht, XMAX-2-(wt--), ht, s & 63)
+
+'                vga.Line(XMAX-2, YMAX-(mask), XMAX-6, YMAX-(mask), s & 63)  ' Hollow triangle
+'                vga.Line(XMAX-6, YMAX-(mask), XMAX-2, YMAX-(mask)-4, s & 63)
+'                vga.Line(XMAX-2, YMAX-(mask)-4, XMAX-2, YMAX-(mask), s & 63)
+
+'    _trigger++
+
+PUB Setup
+
+    clkset(ENAFREQ, CLOCKFREQ)
+    repeat until _ser_cog := ser.StartRXTX (SER_RX, SER_TX, 0, SER_BAUD)
+    ser.clear
+    ser.printf("Serial terminal started (P2 @ %dMHz)\n", clockfreq/1_000_000)
+    SetupPalette
+    if vga.start(VGA_BASEPIN, @_framebuffer, @_palette, WIDTH, HEIGHT)
+        vga.DrawTo(@_offscreen)
+        ser.printf("VGA 8bpp driver started\n")
+        vga.FontAddress(fnt.BaseAddr)
+        vga.FontSize(6, 8)
+        vga.Clear
+        vga.fgcolor($FF)
+        vga.position(0, 0)
+        vga.printf("Ready.")
+    else
+        ser.printf("VGA 8bpp driver failed to start\n")
+        repeat
+
+    cognew(cog_GenerateSamples, @_samplegen_stack)
+    cognew(cog_AudioLoop, @_audio_stack)
+
+PUB SetupPalette | i, r, g, b, c
+' Set up palette
+    r := 0
+    g := 0
+    b := 0
+
+    repeat i from 0 to 255
+        c := 0 | (r << 16) | (g << 8) | b
+        _palette[i] := c
+
+        case i
+            0..63:
+                r += 4
+                g := 0
+                b := 0
+            64..127:
+                r := 0
+                g += 4
+                b := 0
+            128..191:
+                r := 0
+                g := 0
+                b += 4
+            192..254:
+                r += 4
+                g += 4
+                b := 0
+            255:
+                r := 255
+                g := 255
+                b := 255
+
+#include "lib.utility.spin2"
